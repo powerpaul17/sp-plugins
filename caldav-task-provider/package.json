@@ -10,8 +10,5 @@
   "devDependencies": {
     "esbuild": "^0.25.11",
     "typescript": "^5.8.3"
-  },
-  "dependencies": {
-    "@super-productivity/plugin-api": "^1.0.1"
   }
 }
