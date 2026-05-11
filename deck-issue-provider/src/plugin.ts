@@ -1,132 +1,12 @@
 import type {
   IssueProviderPluginDefinition,
-  PluginFieldMapping,
   PluginHttp,
-  PluginIssue,
-  PluginSearchResult,
-} from './plugin-api-types';
-
-declare const PluginAPI: {
-  registerIssueProvider(definition: IssueProviderPluginDefinition): void;
-  translate(key: string, params?: Record<string, string | number>): string;
-};
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface DeckConfig {
-  serverUrl: string;
-  username: string;
-  password: string;
-  boardId: string;
-  importStackIds?: string[];
-  defaultStackId?: string;
-}
-
-interface DeckBoard {
-  id: number;
-  title: string;
-  archived: boolean;
-}
-
-interface DeckLabel {
-  id: number;
-  title: string;
-  color: string;
-}
-
-interface DeckUser {
-  participant: { uid: string; displayname: string };
-}
-
-interface DeckCard {
-  id: number;
-  title: string;
-  description: string;
-  duedate: string | null;
-  lastModified: number;
-  archived: boolean;
-  done: boolean;
-  order: number;
-  labels: DeckLabel[];
-  assignedUsers: DeckUser[];
-}
-
-interface DeckStack {
-  id: number;
-  title: string;
-  boardId: number;
-  cards: DeckCard[];
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const getBaseUrl = (cfg: DeckConfig): string => {
-  const url = (cfg.serverUrl || '').replace(/\/+$/, '');
-  return `${url}/index.php/apps/deck/api/v1.0`;
-};
-
-const t = (key: string): string => {
-  try {
-    return PluginAPI.translate(key);
-  } catch {
-    return key;
-  }
-};
-
-const isAuthError = (err: unknown): boolean =>
-  typeof err === 'object' && err !== null && typeof (err as Record<string, unknown>).status === 'number'
-    ? [401, 403, 404].includes((err as { status: number }).status)
-    : false;
-
-/** Fetch all non-archived cards from configured import stacks. */
-async function getAllCards(
-  cfg: DeckConfig,
-  http: PluginHttp,
-): Promise<{ card: DeckCard; stackTitle: string }[]> {
-  const boardId = parseInt(cfg.boardId, 10);
-  const stacks = await http.get<DeckStack[]>(
-    `${getBaseUrl(cfg)}/boards/${boardId}/stacks`,
-  );
-
-  const importStackIds: number[] = cfg.importStackIds
-    ? cfg.importStackIds.map(Number).filter(Boolean)
-    : [];
-
-  const results: { card: DeckCard; stackTitle: string }[] = [];
-  for (const stack of stacks) {
-    if (importStackIds.length > 0 && !importStackIds.includes(stack.id)) continue;
-    if (!stack.cards) continue;
-    for (const card of stack.cards) {
-      if (card.archived) continue;
-      results.push({ card, stackTitle: stack.title });
-    }
-  }
-  return results;
-}
-
-/** Find the stack containing a specific card. */
-async function findCardStack(
-  cfg: DeckConfig,
-  http: PluginHttp,
-  boardId: number,
-  cardId: number,
-): Promise<DeckStack | null> {
-  const stacks = await http.get<DeckStack[]>(
-    `${getBaseUrl(cfg)}/boards/${boardId}/stacks`,
-  );
-  for (const stack of stacks) {
-    if (stack.cards?.some((c) => c.id === cardId)) return stack;
-  }
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// Plugin Registration
-// ---------------------------------------------------------------------------
+  PluginFieldMapping,
+} from '../../shared/src/plugin-api-types';
+import { t, isAuthError, encodeBasicAuth } from '../../shared/src/helpers';
+import type { DeckConfig } from './deck-client';
+import { getBaseUrl, getAllCards, findCardStack } from './deck-client';
+import { mapDeckCardToSearchResult, mapDeckCardToIssue } from './mapping';
 
 PluginAPI.registerIssueProvider({
   // ── Configuration UI ──────────────────────────────────────────────────────
@@ -162,7 +42,7 @@ PluginAPI.registerIssueProvider({
         http: PluginHttp,
       ): Promise<{ label: string; value: string }[]> {
         try {
-          const boards = await http.get<DeckBoard[]>(
+          const boards = await http.get<import('./deck-client').DeckBoard[]>(
             `${getBaseUrl(config as unknown as DeckConfig)}/boards`,
           );
           return boards
@@ -186,7 +66,7 @@ PluginAPI.registerIssueProvider({
         try {
           const boardId = (config as Record<string, string>).boardId;
           if (!boardId) return [];
-          const stacks = await http.get<DeckStack[]>(
+          const stacks = await http.get<import('./deck-client').DeckStack[]>(
             `${getBaseUrl(config as unknown as DeckConfig)}/boards/${boardId}/stacks`,
           );
           return stacks.map((s) => ({ label: s.title, value: String(s.id) }));
@@ -209,7 +89,7 @@ PluginAPI.registerIssueProvider({
         try {
           const boardId = (config as Record<string, string>).boardId;
           if (!boardId) return [];
-          const stacks = await http.get<DeckStack[]>(
+          const stacks = await http.get<import('./deck-client').DeckStack[]>(
             `${getBaseUrl(config as unknown as DeckConfig)}/boards/${boardId}/stacks`,
           );
           return stacks.map((s) => ({ label: s.title, value: String(s.id) }));
@@ -224,9 +104,7 @@ PluginAPI.registerIssueProvider({
   getHeaders(config: Record<string, unknown>): Record<string, string> {
     const cfg = config as unknown as DeckConfig;
     if (!cfg.username || !cfg.password) return {};
-    const credentials = btoa(
-      unescape(encodeURIComponent(`${cfg.username}:${cfg.password}`)),
-    );
+    const credentials = encodeBasicAuth(cfg.username, cfg.password);
     return {
       Authorization: `Basic ${credentials}`,
       'Content-Type': 'application/json',
@@ -238,18 +116,13 @@ PluginAPI.registerIssueProvider({
     searchTerm: string,
     config: Record<string, unknown>,
     http: PluginHttp,
-  ): Promise<PluginSearchResult[]> {
+  ) {
     try {
       const all = await getAllCards(config as unknown as DeckConfig, http);
       const term = searchTerm.toLowerCase();
       return all
         .filter(({ card }) => card.title.toLowerCase().includes(term))
-        .map(({ card, stackTitle }) => ({
-          id: String(card.id),
-          title: card.title,
-          status: card.done ? 'done' : 'open',
-          assignee: card.assignedUsers?.[0]?.participant?.displayname,
-        }));
+        .map(({ card }) => mapDeckCardToSearchResult(card));
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
       throw e;
@@ -261,24 +134,16 @@ PluginAPI.registerIssueProvider({
     issueId: string,
     config: Record<string, unknown>,
     http: PluginHttp,
-  ): Promise<PluginIssue> {
+  ) {
     const cfg = config as unknown as DeckConfig;
     const boardId = parseInt(cfg.boardId, 10);
     const cardId = parseInt(issueId, 10);
     try {
       const stack = await findCardStack(cfg, http, boardId, cardId);
       if (!stack) throw new Error(`Card ${issueId} not found`);
-      const card = stack.cards!.find((c) => c.id === cardId)!;
-      return {
-        id: String(card.id),
-        title: card.title,
-        body: card.description || '',
-        state: card.done ? 'done' : 'open',
-        lastUpdated: card.lastModified,
-        labels: (card.labels || []).map((l) => l.title),
-        assignee: card.assignedUsers?.[0]?.participant?.displayname,
-        duedate: card.duedate,
-      };
+      const card = stack.cards?.find((c) => c.id === cardId);
+      if (!card) throw new Error(`Card ${issueId} not found`);
+      return mapDeckCardToIssue(card);
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
       throw e;
@@ -319,17 +184,12 @@ PluginAPI.registerIssueProvider({
   async getNewIssuesForBacklog(
     config: Record<string, unknown>,
     http: PluginHttp,
-  ): Promise<PluginSearchResult[]> {
+  ) {
     try {
       const all = await getAllCards(config as unknown as DeckConfig, http);
       return all
         .filter(({ card }) => !card.done && !card.archived)
-        .map(({ card, stackTitle }) => ({
-          id: String(card.id),
-          title: card.title,
-          status: 'open',
-          assignee: card.assignedUsers?.[0]?.participant?.displayname,
-        }));
+        .map(({ card }) => mapDeckCardToSearchResult(card));
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
       throw e;
@@ -406,7 +266,7 @@ PluginAPI.registerIssueProvider({
     title: string,
     config: Record<string, unknown>,
     http: PluginHttp,
-  ): Promise<{ issueId: string; issueData: PluginIssue }> {
+  ) {
     const cfg = config as unknown as DeckConfig;
     if (!cfg.username || !cfg.password) {
       throw new Error(t('ERRORS.TOKEN_REQUIRED'));
@@ -416,7 +276,7 @@ PluginAPI.registerIssueProvider({
     if (!stackId) throw new Error('No default stack configured');
 
     try {
-      const res = await http.post<DeckCard>(
+      const res = await http.post<import('./deck-client').DeckCard>(
         `${getBaseUrl(cfg)}/boards/${boardId}/stacks/${stackId}/cards`,
         { title, type: 'plain', owner: cfg.username },
       );
@@ -458,7 +318,7 @@ PluginAPI.registerIssueProvider({
   },
 
   // ── Extract Sync Values (conflict detection) ──────────────────────────────
-  extractSyncValues(issue: PluginIssue): Record<string, unknown> {
+  extractSyncValues(issue: import('../../shared/src/plugin-api-types').PluginIssue): Record<string, unknown> {
     return {
       done: issue.state === 'done',
       title: issue.title,
