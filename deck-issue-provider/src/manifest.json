@@ -1,0 +1,25 @@
+{
+  "id": "deck-issue-provider",
+  "name": "Nextcloud Deck",
+  "version": "1.0.0",
+  "manifestVersion": 1,
+  "minSupVersion": "13.0.0",
+  "description": "Bidirectional sync with Nextcloud Deck boards — create, update, and complete cards.",
+  "author": "sp-nextcloud-plugins",
+  "type": "issueProvider",
+  "icon": "icon.svg",
+  "iFrame": false,
+  "permissions": ["http"],
+  "hooks": [],
+  "issueProvider": {
+    "pollIntervalMs": 60000,
+    "icon": "kanban",
+    "humanReadableName": "Deck",
+    "issueStrings": {
+      "singular": "Card",
+      "plural": "Cards"
+    },
+    "defaultAutoAddToBacklog": false,
+    "allowPrivateNetwork": true
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "caldav-task-provider",
+  "name": "CalDAV Tasks",
+  "version": "1.0.0",
+  "manifestVersion": 1,
+  "minSupVersion": "13.0.0",
+  "description": "Bidirectional sync with CalDAV VTODO tasks (Nextcloud Tasks, Apple Reminders, etc.) — create, update, and complete tasks.",
+  "author": "sp-nextcloud-plugins",
+  "type": "issueProvider",
+  "icon": "icon.svg",
+  "iFrame": false,
+  "permissions": ["http"],
+  "hooks": [],
+  "issueProvider": {
+    "pollIntervalMs": 60000,
+    "icon": "tasks",
+    "humanReadableName": "Tasks",
+    "issueStrings": {
+      "singular": "Task",
+      "plural": "Tasks"
+    },
+    "defaultAutoAddToBacklog": false,
+    "allowPrivateNetwork": true
+  }
+}

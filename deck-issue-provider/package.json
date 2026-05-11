@@ -1,0 +1,17 @@
+{
+  "name": "deck-issue-provider",
+  "version": "1.0.0",
+  "description": "Nextcloud Deck issue provider plugin for Super Productivity",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "package": "node scripts/package.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.11",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@super-productivity/plugin-api": "^1.0.1"
+  }
+}
