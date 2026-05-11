@@ -3,6 +3,8 @@
 // Inlined because the npm package doesn't export issue-provider types.
 // Keep in sync with upstream when updating.
 
+/// <reference path="./globals.d.ts" />
+
 export interface PluginSearchResult {
   id: string;
   title: string;
