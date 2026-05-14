@@ -26,6 +26,135 @@ import {
 } from './ical-utils';
 import { mapVtodoToSearchResult, mapVtodoToIssue } from './mapping';
 
+// ── Auto-create unlinked tasks ──────────────────────────────────────────────
+const SYNC_TAG_TITLE = '🔗 SYNC_PENDING';
+let _syncTagId: string | null = null;
+
+async function _ensureSyncTag(): Promise<string> {
+  if (_syncTagId) return _syncTagId;
+  const tags = await PluginAPI.getAllTags();
+  const found = tags.find((t: SpTag) => t.title === SYNC_TAG_TITLE);
+  if (found) {
+    _syncTagId = found.id;
+    return _syncTagId;
+  }
+  const newId = await PluginAPI.addTag({ title: SYNC_TAG_TITLE, color: '#ff9800' });
+  _syncTagId = newId;
+  return _syncTagId;
+}
+
+async function _onSyncButtonClick(): Promise<void> {
+  try {
+    const cfg = await PluginAPI.getConfig<Record<string, unknown>>();
+    if (!cfg?.autoCreateUnlinked) {
+      PluginAPI.showSnack({
+        msg: 'Enable "Auto-create unlinked tasks" in project settings first',
+        type: 'WARNING',
+      });
+      return;
+    }
+    const tasks = await PluginAPI.getTasks();
+    const unlinked = tasks.filter((t: SpTask) => !t.issueId && !t.isDone);
+    if (unlinked.length === 0) {
+      PluginAPI.showSnack({ msg: 'All tasks already have linked VTODOs!', type: 'INFO' });
+      return;
+    }
+    const tagId = await _ensureSyncTag();
+    for (const task of unlinked) {
+      const newTagIds = task.tagIds ? [...task.tagIds] : [];
+      if (!newTagIds.includes(tagId)) {
+        newTagIds.push(tagId);
+      }
+      await PluginAPI.updateTask(task.id, { tagIds: newTagIds });
+    }
+    PluginAPI.showSnack({
+      msg: `Marked ${unlinked.length} tasks for sync — next poll will create VTODOs`,
+      type: 'SUCCESS',
+    });
+  } catch (e) {
+    PluginAPI.showSnack({
+      msg: `Error: ${e instanceof Error ? e.message : String(e)}`,
+      type: 'ERROR',
+    });
+  }
+}
+
+async function createTaskInCaldav(
+  title: string,
+  config: CaldavConfig,
+  http: PluginHttp,
+): Promise<{ issueId: string }> {
+  const uuid = generateUuid();
+  const taskHref = `${config.calendarHref.replace(/\/?$/, '/')}${uuid}.ics`;
+  const icalBody = buildIcalTask({
+    uid: uuid,
+    summary: title,
+    status: 'NEEDS-ACTION',
+  });
+  await http.request<string>('PUT', taskHref, icalBody, {
+    headers: { 'Content-Type': 'text/calendar; charset=utf-8' },
+    responseType: 'text',
+  });
+  return { issueId: taskHref };
+}
+
+async function processUnlinkedTasks(
+  config: CaldavConfig,
+  http: PluginHttp,
+): Promise<void> {
+  try {
+    const tagId = await _ensureSyncTag();
+    const tasks = await PluginAPI.getTasks();
+    const tagged = tasks.filter(
+      (t: SpTask) => !t.issueId && !t.isDone && (t.tagIds || []).includes(tagId),
+    );
+    if (tagged.length === 0) return;
+
+    const allTasks = await fetchTasks(config, http);
+    let created = 0;
+
+    for (const task of tagged) {
+      // Dedup: skip if VTODO with same summary already exists
+      const exists = allTasks.some(
+        (vt) => vt.summary.toLowerCase() === task.title.toLowerCase(),
+      );
+      if (exists) {
+        const newTagIds = (task.tagIds || []).filter((id: string) => id !== tagId);
+        await PluginAPI.updateTask(task.id, { tagIds: newTagIds });
+        continue;
+      }
+
+      const result = await createTaskInCaldav(task.title, config, http);
+      created++;
+
+      const newTagIds = (task.tagIds || []).filter((id: string) => id !== tagId);
+      await PluginAPI.updateTask(task.id, {
+        issueId: result.issueId,
+        tagIds: newTagIds,
+      });
+    }
+
+    if (created > 0) {
+      PluginAPI.showSnack({
+        msg: `Created ${created} VTODO(s) in CalDAV`,
+        type: 'SUCCESS',
+      });
+    }
+  } catch (e) {
+    PluginAPI.showSnack({
+      msg: `Auto-sync error: ${e instanceof Error ? e.message : String(e)}`,
+      type: 'ERROR',
+    });
+  }
+}
+
+// Register header button for manual sync
+PluginAPI.registerHeaderButton({
+  label: 'Sync unlinked',
+  icon: 'sync',
+  onClick: _onSyncButtonClick,
+});
+
 PluginAPI.registerIssueProvider({
   // ── Configuration UI ──────────────────────────────────────────────────────
   configFields: [
@@ -75,6 +204,14 @@ PluginAPI.registerIssueProvider({
           return [{ label: '(failed to load calendars)', value: '' }];
         }
       },
+    },
+    {
+      key: 'autoCreateUnlinked',
+      type: 'checkbox',
+      label: 'Auto-create tasks for unlinked tasks',
+      description:
+        'When enabled, clicking the "Sync unlinked" header button creates CalDAV VTODOs for tasks without an issueId.',
+      default: false,
     },
   ],
 
@@ -176,9 +313,17 @@ PluginAPI.registerIssueProvider({
   ) {
     try {
       const tasks = await fetchTasks(config as unknown as CaldavConfig, http);
-      return tasks
+      const backlog = tasks
         .filter((t) => !t.completed && t.status !== 'COMPLETED')
         .map(mapVtodoToSearchResult);
+
+      // Auto-create VTODOs for unlinked tasks if enabled
+      const cfg = config as unknown as CaldavConfig;
+      if (cfg.autoCreateUnlinked) {
+        await processUnlinkedTasks(cfg, http);
+      }
+
+      return backlog;
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
       throw e;
@@ -323,24 +468,13 @@ PluginAPI.registerIssueProvider({
     http: PluginHttp,
   ) {
     const cfg = config as unknown as CaldavConfig;
-    const uuid = generateUuid();
-    const taskHref = `${cfg.calendarHref.replace(/\/?$/, '/')}${uuid}.ics`;
-
-    const icalBody = buildIcalTask({
-      uid: uuid,
-      summary: title,
-      status: 'NEEDS-ACTION',
-    });
 
     try {
-      await http.request<string>('PUT', taskHref, icalBody, {
-        headers: { 'Content-Type': 'text/calendar; charset=utf-8' },
-        responseType: 'text',
-      });
+      const result = await createTaskInCaldav(title, cfg, http);
       return {
-        issueId: taskHref,
+        issueId: result.issueId,
         issueData: {
-          id: taskHref,
+          id: result.issueId,
           title,
           body: '',
           state: 'NEEDS-ACTION',

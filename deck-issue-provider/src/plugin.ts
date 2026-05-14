@@ -8,6 +8,131 @@ import type { DeckConfig } from './deck-client';
 import { getBaseUrl, getAllCards, findCardStack } from './deck-client';
 import { mapDeckCardToSearchResult, mapDeckCardToIssue } from './mapping';
 
+// ── Auto-create unlinked tasks ──────────────────────────────────────────────
+const SYNC_TAG_TITLE = '🔗 SYNC_PENDING';
+let _syncTagId: string | null = null;
+
+async function _ensureSyncTag(): Promise<string> {
+  if (_syncTagId) return _syncTagId;
+  const tags = await PluginAPI.getAllTags();
+  const found = tags.find((t: SpTag) => t.title === SYNC_TAG_TITLE);
+  if (found) {
+    _syncTagId = found.id;
+    return _syncTagId;
+  }
+  const newId = await PluginAPI.addTag({ title: SYNC_TAG_TITLE, color: '#ff9800' });
+  _syncTagId = newId;
+  return _syncTagId;
+}
+
+async function _onSyncButtonClick(): Promise<void> {
+  try {
+    const cfg = await PluginAPI.getConfig<Record<string, unknown>>();
+    if (!cfg?.autoCreateUnlinked) {
+      PluginAPI.showSnack({
+        msg: 'Enable "Auto-create unlinked cards" in project settings first',
+        type: 'WARNING',
+      });
+      return;
+    }
+    const tasks = await PluginAPI.getTasks();
+    const unlinked = tasks.filter((t: SpTask) => !t.issueId && !t.isDone);
+    if (unlinked.length === 0) {
+      PluginAPI.showSnack({ msg: 'All tasks already have linked cards!', type: 'INFO' });
+      return;
+    }
+    const tagId = await _ensureSyncTag();
+    for (const task of unlinked) {
+      const newTagIds = task.tagIds ? [...task.tagIds] : [];
+      if (!newTagIds.includes(tagId)) {
+        newTagIds.push(tagId);
+      }
+      await PluginAPI.updateTask(task.id, { tagIds: newTagIds });
+    }
+    PluginAPI.showSnack({
+      msg: `Marked ${unlinked.length} tasks for sync — next poll will create cards`,
+      type: 'SUCCESS',
+    });
+  } catch (e) {
+    PluginAPI.showSnack({
+      msg: `Error: ${e instanceof Error ? e.message : String(e)}`,
+      type: 'ERROR',
+    });
+  }
+}
+
+async function createCardInDeck(
+  title: string,
+  config: DeckConfig,
+  http: PluginHttp,
+): Promise<{ issueId: string }> {
+  const boardId = parseInt(config.boardId, 10);
+  const stackId = parseInt(config.defaultStackId || '0', 10);
+  if (!stackId) throw new Error('No default stack configured');
+  const res = await http.post<DeckCard>(
+    `${getBaseUrl(config)}/boards/${boardId}/stacks/${stackId}/cards`,
+    { title, type: 'plain', owner: config.username },
+  );
+  return { issueId: String(res.id) };
+}
+
+async function processUnlinkedTasks(
+  config: DeckConfig,
+  http: PluginHttp,
+): Promise<void> {
+  try {
+    const tagId = await _ensureSyncTag();
+    const tasks = await PluginAPI.getTasks();
+    const tagged = tasks.filter(
+      (t: SpTask) => !t.issueId && !t.isDone && (t.tagIds || []).includes(tagId),
+    );
+    if (tagged.length === 0) return;
+
+    const allCards = await getAllCards(config, http);
+    let created = 0;
+
+    for (const task of tagged) {
+      // Dedup: skip if card with same title already exists
+      const exists = allCards.some(
+        ({ card }) => card.title.toLowerCase() === task.title.toLowerCase(),
+      );
+      if (exists) {
+        const newTagIds = (task.tagIds || []).filter((id: string) => id !== tagId);
+        await PluginAPI.updateTask(task.id, { tagIds: newTagIds });
+        continue;
+      }
+
+      const result = await createCardInDeck(task.title, config, http);
+      created++;
+
+      const newTagIds = (task.tagIds || []).filter((id: string) => id !== tagId);
+      await PluginAPI.updateTask(task.id, {
+        issueId: result.issueId,
+        tagIds: newTagIds,
+      });
+    }
+
+    if (created > 0) {
+      PluginAPI.showSnack({
+        msg: `Created ${created} card(s) in Deck`,
+        type: 'SUCCESS',
+      });
+    }
+  } catch (e) {
+    PluginAPI.showSnack({
+      msg: `Auto-sync error: ${e instanceof Error ? e.message : String(e)}`,
+      type: 'ERROR',
+    });
+  }
+}
+
+// Register header button for manual sync
+PluginAPI.registerHeaderButton({
+  label: 'Sync unlinked',
+  icon: 'sync',
+  onClick: _onSyncButtonClick,
+});
+
 PluginAPI.registerIssueProvider({
   // ── Configuration UI ──────────────────────────────────────────────────────
   configFields: [
@@ -98,6 +223,14 @@ PluginAPI.registerIssueProvider({
         }
       },
     },
+    {
+      key: 'autoCreateUnlinked',
+      type: 'checkbox',
+      label: 'Auto-create cards for unlinked tasks',
+      description:
+        'When enabled, clicking the "Sync unlinked" header button creates Deck cards for tasks without an issueId. Works on all non-done tasks without a linked card.',
+      default: false,
+    },
   ],
 
   // ── HTTP Headers: Basic Auth ──────────────────────────────────────────────
@@ -187,9 +320,17 @@ PluginAPI.registerIssueProvider({
   ) {
     try {
       const all = await getAllCards(config as unknown as DeckConfig, http);
-      return all
+      const backlog = all
         .filter(({ card }) => !card.done && !card.archived)
         .map(({ card }) => mapDeckCardToSearchResult(card));
+
+      // Auto-create cards for unlinked tasks if enabled
+      const cfg = config as unknown as DeckConfig;
+      if (cfg.autoCreateUnlinked) {
+        await processUnlinkedTasks(cfg, http);
+      }
+
+      return backlog;
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
       throw e;
@@ -271,23 +412,17 @@ PluginAPI.registerIssueProvider({
     if (!cfg.username || !cfg.password) {
       throw new Error(t('ERRORS.TOKEN_REQUIRED'));
     }
-    const boardId = parseInt(cfg.boardId, 10);
-    const stackId = parseInt(cfg.defaultStackId || '0', 10);
-    if (!stackId) throw new Error('No default stack configured');
 
     try {
-      const res = await http.post<import('./deck-client').DeckCard>(
-        `${getBaseUrl(cfg)}/boards/${boardId}/stacks/${stackId}/cards`,
-        { title, type: 'plain', owner: cfg.username },
-      );
+      const result = await createCardInDeck(title, cfg, http);
       return {
-        issueId: String(res.id),
+        issueId: result.issueId,
         issueData: {
-          id: String(res.id),
-          title: res.title,
-          body: res.description || '',
-          state: res.done ? 'done' : 'open',
-          lastUpdated: res.lastModified,
+          id: result.issueId,
+          title,
+          body: '',
+          state: 'open',
+          lastUpdated: Date.now(),
         },
       };
     } catch (e) {
