@@ -9,7 +9,6 @@ import {
   getServerUrl,
   buildPropfind,
   buildCalendarQuery,
-  parseCalendarList,
   parseTaskReport,
   resolveHref,
   fetchTasks,
@@ -30,12 +29,12 @@ PluginAPI.registerIssueProvider({
   // ── Configuration UI ──────────────────────────────────────────────────────
   configFields: [
     {
-      key: 'serverUrl',
+      key: 'calendarUrl',
       type: 'input',
-      label: 'CalDAV Server URL',
+      label: 'Calendar URL',
       required: true,
       description:
-        'e.g. https://cloud.example.com/remote.php/dav/principals/users/username/',
+        'Full URL to the CalDAV calendar, e.g. https://cloud.example.com/remote.php/dav/calendars/username/personal/'
     },
     {
       key: 'username',
@@ -48,34 +47,8 @@ PluginAPI.registerIssueProvider({
       type: 'password',
       label: 'App Password',
       required: true,
-      description: 'Generate in Nextcloud Settings → Security → App Passwords',
-    },
-    {
-      key: 'calendarHref',
-      type: 'select',
-      label: 'Task Calendar',
-      required: true,
-      showIf: 'serverUrl',
-      async loadOptions(
-        config: Record<string, unknown>,
-        http: PluginHttp,
-      ): Promise<{ label: string; value: string }[]> {
-        try {
-          const cfg = config as unknown as CaldavConfig;
-          const base = getServerUrl(cfg);
-          const xml = await http.request<string>(
-            'PROPFIND',
-            base,
-            buildPropfind(),
-            { headers: { 'Content-Type': 'application/xml; charset=UTF-8', Depth: '1' }, responseType: 'text' },
-          );
-          const calendars = parseCalendarList(xml);
-          return calendars.map((c) => ({ label: c.displayName, value: c.href }));
-        } catch {
-          return [{ label: '(failed to load calendars)', value: '' }];
-        }
-      },
-    },
+      description: 'Generate in Nextcloud Settings → Security → App Passwords'
+    }
   ],
 
   // ── HTTP Headers ──────────────────────────────────────────────────────────
@@ -158,11 +131,29 @@ PluginAPI.registerIssueProvider({
     http: PluginHttp,
   ): Promise<boolean> {
     try {
-      const base = getServerUrl(config as unknown as CaldavConfig);
+      const cfg = config as unknown as CaldavConfig;
+      const base = getServerUrl(cfg);
       await http.request<string>('PROPFIND', base, buildPropfind(), {
-        headers: { 'Content-Type': 'application/xml; charset=UTF-8', Depth: '0' },
-        responseType: 'text',
+        headers: {
+          'Content-Type': 'application/xml; charset=UTF-8',
+          Depth: '0'
+        },
+        responseType: 'text'
       });
+      if (cfg.calendarUrl) {
+        await http.request<string>(
+          'PROPFIND',
+          cfg.calendarUrl,
+          buildPropfind(),
+          {
+            headers: {
+              'Content-Type': 'application/xml; charset=UTF-8',
+              Depth: '0'
+            },
+            responseType: 'text'
+          }
+        );
+      }
       return true;
     } catch {
       return false;
@@ -324,7 +315,9 @@ PluginAPI.registerIssueProvider({
   ) {
     const cfg = config as unknown as CaldavConfig;
     const uuid = generateUuid();
-    const taskHref = `${cfg.calendarHref.replace(/\/?$/, '/')}${uuid}.ics`;
+    const baseUrl = cfg.calendarUrl.replace(/\/?$/, '/');
+    const taskUrl = baseUrl + uuid + '.ics';
+    const taskHref = new URL(taskUrl).pathname;
 
     const icalBody = buildIcalTask({
       uid: uuid,
@@ -333,7 +326,7 @@ PluginAPI.registerIssueProvider({
     });
 
     try {
-      await http.request<string>('PUT', taskHref, icalBody, {
+      await http.request<string>('PUT', taskUrl, icalBody, {
         headers: { 'Content-Type': 'text/calendar; charset=utf-8' },
         responseType: 'text',
       });
