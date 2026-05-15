@@ -41,6 +41,7 @@ declare const PluginAPI: {
 
   // Tasks
   getTasks(): Promise<SpTask[]>;
+  getCurrentContextTasks(): Promise<SpTask[]>;
   updateTask(taskId: string, updates: Record<string, unknown>): Promise<void>;
 
   // Tags

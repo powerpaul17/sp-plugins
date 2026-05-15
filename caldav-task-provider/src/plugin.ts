@@ -53,7 +53,7 @@ async function _onSyncButtonClick(): Promise<void> {
       });
       return;
     }
-    const tasks = await PluginAPI.getTasks();
+    const tasks = await PluginAPI.getCurrentContextTasks();
     const unlinked = tasks.filter((t: SpTask) => !t.issueId && !t.isDone);
     if (unlinked.length === 0) {
       PluginAPI.showSnack({ msg: 'All tasks already have linked VTODOs!', type: 'INFO' });
@@ -104,7 +104,7 @@ async function processUnlinkedTasks(
 ): Promise<void> {
   try {
     const tagId = await _ensureSyncTag();
-    const tasks = await PluginAPI.getTasks();
+    const tasks = await PluginAPI.getCurrentContextTasks();
     const tagged = tasks.filter(
       (t: SpTask) => !t.issueId && !t.isDone && (t.tagIds || []).includes(tagId),
     );
