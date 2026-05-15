@@ -1,7 +1,7 @@
 import type {
   IssueProviderPluginDefinition,
   PluginHttp,
-  PluginFieldMapping,
+  PluginFieldMapping
 } from '../../shared/src/plugin-api-types';
 import { t, isAuthError, encodeBasicAuth } from '../../shared/src/helpers';
 import type { CaldavConfig } from './caldav-client';
@@ -12,7 +12,7 @@ import {
   parseTaskReport,
   resolveHref,
   fetchTasks,
-  generateUuid,
+  generateUuid
 } from './caldav-client';
 import {
   escapeIcalText,
@@ -21,7 +21,7 @@ import {
   parseIcalDateTime,
   buildIcalTask,
   modifyIcalTask,
-  parseDuration,
+  parseDuration
 } from './ical-utils';
 import { mapVtodoToSearchResult, mapVtodoToIssue } from './mapping';
 
@@ -40,7 +40,7 @@ PluginAPI.registerIssueProvider({
       key: 'username',
       type: 'input',
       label: 'Username',
-      required: true,
+      required: true
     },
     {
       key: 'password',
@@ -57,8 +57,7 @@ PluginAPI.registerIssueProvider({
     if (!cfg.username || !cfg.password) return {};
     const creds = encodeBasicAuth(cfg.username, cfg.password);
     return {
-      Authorization: `Basic ${creds}`,
-      'Content-Type': 'application/json',
+      Authorization: `Basic ${creds}`
     };
   },
 
@@ -66,7 +65,7 @@ PluginAPI.registerIssueProvider({
   async searchIssues(
     searchTerm: string,
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ) {
     try {
       const cfg = config as unknown as CaldavConfig;
@@ -85,7 +84,7 @@ PluginAPI.registerIssueProvider({
   async getById(
     issueId: string,
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ) {
     try {
       const cfg = config as unknown as CaldavConfig;
@@ -95,9 +94,12 @@ PluginAPI.registerIssueProvider({
         fullUrl,
         buildCalendarQuery(),
         {
-          headers: { 'Content-Type': 'application/xml; charset=UTF-8', Depth: '0' },
-          responseType: 'text',
-        },
+          headers: {
+            'Content-Type': 'application/xml; charset=UTF-8',
+            Depth: '0'
+          },
+          responseType: 'text'
+        }
       );
       const tasks = parseTaskReport(xml);
       if (tasks.length === 0) throw new Error(`Task ${issueId} not found`);
@@ -122,13 +124,18 @@ PluginAPI.registerIssueProvider({
     { field: 'dueDate', label: 'Due', type: 'date', hideEmpty: true },
     { field: 'location', label: 'Location', type: 'text', hideEmpty: true },
     { field: 'body', label: 'Description', type: 'markdown' },
-    { field: 'percentComplete', label: '% Complete', type: 'text', hideEmpty: true },
+    {
+      field: 'percentComplete',
+      label: '% Complete',
+      type: 'text',
+      hideEmpty: true
+    },
   ],
 
   // ── Test Connection ───────────────────────────────────────────────────────
   async testConnection(
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ): Promise<boolean> {
     try {
       const cfg = config as unknown as CaldavConfig;
@@ -163,7 +170,7 @@ PluginAPI.registerIssueProvider({
   // ── Backlog Import ────────────────────────────────────────────────────────
   async getNewIssuesForBacklog(
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ) {
     try {
       const tasks = await fetchTasks(config as unknown as CaldavConfig, http);
@@ -184,22 +191,21 @@ PluginAPI.registerIssueProvider({
       defaultDirection: 'both',
       toIssueValue: (taskValue: unknown): string =>
         taskValue ? 'COMPLETED' : 'NEEDS-ACTION',
-      toTaskValue: (issueValue: unknown): boolean =>
-        issueValue === 'COMPLETED',
+      toTaskValue: (issueValue: unknown): boolean => issueValue === 'COMPLETED'
     },
     {
       taskField: 'title',
       issueField: 'summary',
       defaultDirection: 'both',
       toIssueValue: (v: unknown) => (v as string) ?? '',
-      toTaskValue: (v: unknown) => (v as string) ?? '',
+      toTaskValue: (v: unknown) => (v as string) ?? ''
     },
     {
       taskField: 'notes',
       issueField: 'description',
       defaultDirection: 'both',
       toIssueValue: (v: unknown) => (v as string) ?? '',
-      toTaskValue: (v: unknown) => (v as string) ?? '',
+      toTaskValue: (v: unknown) => (v as string) ?? ''
     },
     {
       taskField: 'dueWithTime',
@@ -212,7 +218,7 @@ PluginAPI.registerIssueProvider({
         if (!issueValue) return undefined;
         const d = parseIcalDateTime(issueValue as string, '');
         return d?.getTime();
-      },
+      }
     },
     {
       taskField: 'dueDay',
@@ -220,13 +226,15 @@ PluginAPI.registerIssueProvider({
       defaultDirection: 'both',
       mutuallyExclusive: ['dueWithTime'],
       toIssueValue: (taskValue: unknown): string =>
-        taskValue ? toIcalDate(new Date(taskValue as string + 'T12:00:00')) : '',
+        taskValue
+          ? toIcalDate(new Date((taskValue as string) + 'T12:00:00'))
+          : '',
       toTaskValue: (issueValue: unknown): string | undefined => {
         if (!issueValue) return undefined;
         const d = parseIcalDateTime(issueValue as string, '');
         if (!d) return undefined;
         return toIcalDate(d);
-      },
+      }
     },
     {
       taskField: 'timeEstimate',
@@ -236,7 +244,7 @@ PluginAPI.registerIssueProvider({
       toTaskValue: (issueValue: unknown): number | undefined => {
         if (!issueValue) return undefined;
         return parseDuration(issueValue as string);
-      },
+      }
     },
   ] satisfies PluginFieldMapping[],
 
@@ -245,7 +253,7 @@ PluginAPI.registerIssueProvider({
     id: string,
     changes: Record<string, unknown>,
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ): Promise<void> {
     const cfg = config as unknown as CaldavConfig;
     const fullUrl = resolveHref(cfg, id);
@@ -256,9 +264,12 @@ PluginAPI.registerIssueProvider({
         fullUrl,
         buildCalendarQuery(),
         {
-          headers: { 'Content-Type': 'application/xml; charset=UTF-8', Depth: '0' },
-          responseType: 'text',
-        },
+          headers: {
+            'Content-Type': 'application/xml; charset=UTF-8',
+            Depth: '0'
+          },
+          responseType: 'text'
+        }
       );
       const tasks = parseTaskReport(currentXml);
       if (tasks.length === 0) throw new Error(`Task ${id} not found`);
@@ -278,7 +289,9 @@ PluginAPI.registerIssueProvider({
         icalChanges['SUMMARY'] = escapeIcalText(changes['summary'] as string);
       }
       if ('description' in changes) {
-        icalChanges['DESCRIPTION'] = escapeIcalText(changes['description'] as string);
+        icalChanges['DESCRIPTION'] = escapeIcalText(
+          changes['description'] as string
+        );
       }
       if ('due_timed' in changes && changes['due_timed']) {
         icalChanges['DUE'] = changes['due_timed'] as string;
@@ -291,7 +304,7 @@ PluginAPI.registerIssueProvider({
       const modified = modifyIcalTask(vt.rawIcal, icalChanges);
 
       const headers: Record<string, string> = {
-        'Content-Type': 'text/calendar; charset=utf-8',
+        'Content-Type': 'text/calendar; charset=utf-8'
       };
       if (vt.etag) {
         headers['If-Match'] = vt.etag;
@@ -299,7 +312,7 @@ PluginAPI.registerIssueProvider({
 
       await http.request<string>('PUT', fullUrl, modified, {
         headers,
-        responseType: 'text',
+        responseType: 'text'
       });
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
@@ -311,7 +324,7 @@ PluginAPI.registerIssueProvider({
   async createIssue(
     title: string,
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ) {
     const cfg = config as unknown as CaldavConfig;
     const uuid = generateUuid();
@@ -322,13 +335,13 @@ PluginAPI.registerIssueProvider({
     const icalBody = buildIcalTask({
       uid: uuid,
       summary: title,
-      status: 'NEEDS-ACTION',
+      status: 'NEEDS-ACTION'
     });
 
     try {
       await http.request<string>('PUT', taskUrl, icalBody, {
         headers: { 'Content-Type': 'text/calendar; charset=utf-8' },
-        responseType: 'text',
+        responseType: 'text'
       });
       return {
         issueId: taskHref,
@@ -337,8 +350,8 @@ PluginAPI.registerIssueProvider({
           title,
           body: '',
           state: 'NEEDS-ACTION',
-          lastUpdated: Date.now(),
-        },
+          lastUpdated: Date.now()
+        }
       };
     } catch (e) {
       if (isAuthError(e)) throw new Error(t('ERRORS.INSUFFICIENT_PERMISSIONS'));
@@ -350,13 +363,13 @@ PluginAPI.registerIssueProvider({
   async deleteIssue(
     id: string,
     config: Record<string, unknown>,
-    http: PluginHttp,
+    http: PluginHttp
   ): Promise<void> {
     const cfg = config as unknown as CaldavConfig;
     const fullUrl = resolveHref(cfg, id);
     try {
       await http.request<string>('DELETE', fullUrl, undefined, {
-        responseType: 'text',
+        responseType: 'text'
       });
     } catch (e) {
       if (isAuthError(e)) {
@@ -369,11 +382,13 @@ PluginAPI.registerIssueProvider({
   },
 
   // ── Extract Sync Values ───────────────────────────────────────────────────
-  extractSyncValues(issue: import('../../shared/src/plugin-api-types').PluginIssue): Record<string, unknown> {
+  extractSyncValues(
+    issue: import('../../shared/src/plugin-api-types').PluginIssue
+  ): Record<string, unknown> {
     return {
       summary: issue.title,
       description: issue.body,
       status: issue.state,
     };
-  },
+  }
 });

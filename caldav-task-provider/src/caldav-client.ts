@@ -33,7 +33,8 @@ export function resolveHref(cfg: CaldavConfig, href: string): string {
   return base.replace(/\/+$/, '') + cleanHref;
 }
 
-export const buildPropfind = (): string => `<?xml version="1.0" encoding="UTF-8"?>
+export const buildPropfind =
+  (): string => `<?xml version="1.0" encoding="UTF-8"?>
 <d:propfind xmlns:d="${DAV_NS}" xmlns:cs="${CS_NS}" xmlns:c="${CALDAV_NS}">
   <d:prop>
     <d:displayname/>
@@ -43,7 +44,8 @@ export const buildPropfind = (): string => `<?xml version="1.0" encoding="UTF-8"
   </d:prop>
 </d:propfind>`;
 
-export const buildCalendarQuery = (): string => `<?xml version="1.0" encoding="UTF-8"?>
+export const buildCalendarQuery =
+  (): string => `<?xml version="1.0" encoding="UTF-8"?>
 <c:calendar-query xmlns:d="${DAV_NS}" xmlns:c="${CALDAV_NS}">
   <d:prop>
     <d:getetag/>
@@ -73,7 +75,8 @@ const getXmlText = (parent: Element, localName: string): string => {
 const supportsComponent = (parent: Element, name: string): boolean => {
   const all = parent.getElementsByTagName('*');
   for (let i = 0; i < all.length; i++) {
-    if (all[i].localName === 'comp' && all[i].getAttribute('name') === name) return true;
+    if (all[i].localName === 'comp' && all[i].getAttribute('name') === name)
+      return true;
     if (
       all[i].localName === 'supported-calendar-component-set' &&
       all[i].textContent?.includes(name)
@@ -103,14 +106,14 @@ export const parseTaskReport = (xml: string): ParsedVtodo[] => {
 
 export async function fetchTasks(
   cfg: CaldavConfig,
-  http: PluginHttp,
+  http: PluginHttp
 ): Promise<ParsedVtodo[]> {
   if (!cfg.calendarUrl) return [];
 
   const url = resolveHref(cfg, cfg.calendarUrl);
   const xml = await http.request<string>('REPORT', url, buildCalendarQuery(), {
     headers: { 'Content-Type': 'application/xml; charset=UTF-8', Depth: '1' },
-    responseType: 'text',
+    responseType: 'text'
   });
   return parseTaskReport(xml);
 }

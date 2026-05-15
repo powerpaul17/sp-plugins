@@ -62,7 +62,10 @@ export const getIcalPropParams = (lines: string[], name: string): string => {
   return '';
 };
 
-export const parseIcalDateTime = (value: string, _params: string): Date | null => {
+export const parseIcalDateTime = (
+  value: string,
+  _params: string
+): Date | null => {
   if (!value) return null;
   if (value.length === 8) {
     const y = parseInt(value.slice(0, 4), 10);
@@ -86,14 +89,20 @@ export const parseIcalDateTime = (value: string, _params: string): Date | null =
 export const toIcalUtc = (date: Date): string => {
   const p = (n: number): string => String(n).padStart(2, '0');
   return (
-    `${date.getUTCFullYear()}${p(date.getUTCMonth() + 1)}${p(date.getUTCDate())}` +
-    `T${p(date.getUTCHours())}${p(date.getUTCMinutes())}${p(date.getUTCSeconds())}Z`
+    `${date.getUTCFullYear()}${p(date.getUTCMonth() + 1)}${p(
+      date.getUTCDate()
+    )}` +
+    `T${p(date.getUTCHours())}${p(date.getUTCMinutes())}${p(
+      date.getUTCSeconds()
+    )}Z`
   );
 };
 
 export const toIcalDate = (date: Date): string => {
   const p = (n: number): string => String(n).padStart(2, '0');
-  return `${date.getUTCFullYear()}${p(date.getUTCMonth() + 1)}${p(date.getUTCDate())}`;
+  return `${date.getUTCFullYear()}${p(date.getUTCMonth() + 1)}${p(
+    date.getUTCDate()
+  )}`;
 };
 
 export interface ParsedVtodo {
@@ -117,7 +126,11 @@ export interface ParsedVtodo {
   rawIcal: string;
 }
 
-export const parseVtodos = (icalData: string, href: string, etag: string): ParsedVtodo | null => {
+export const parseVtodos = (
+  icalData: string,
+  href: string,
+  etag: string
+): ParsedVtodo | null => {
   const unfolded = unfoldIcal(icalData);
   const start = unfolded.indexOf('BEGIN:VTODO');
   if (start === -1) return null;
@@ -144,7 +157,7 @@ export const parseVtodos = (icalData: string, href: string, etag: string): Parse
     percentComplete: getIcalProp(lines, 'PERCENT-COMPLETE'),
     duration: getIcalProp(lines, 'DURATION'),
     lastModified: getIcalProp(lines, 'LAST-MODIFIED'),
-    rawIcal: icalData,
+    rawIcal: icalData
   };
 };
 
@@ -169,21 +182,21 @@ export const buildIcalTask = (task: {
     'PRODID:-//Super Productivity//CalDAV Tasks//EN',
     'BEGIN:VTODO',
     foldIcalLine(`UID:${task.uid}`),
-    `DTSTAMP:${now}`,
+    `DTSTAMP:${now}`
   ];
 
   if (task.dtstart) {
     l.push(
       task.dtstartParam
         ? foldIcalLine(`DTSTART;${task.dtstartParam}:${task.dtstart}`)
-        : foldIcalLine(`DTSTART:${task.dtstart}`),
+        : foldIcalLine(`DTSTART:${task.dtstart}`)
     );
   }
   if (task.due) {
     l.push(
       task.dueParam
         ? foldIcalLine(`DUE;${task.dueParam}:${task.due}`)
-        : foldIcalLine(`DUE:${task.due}`),
+        : foldIcalLine(`DUE:${task.due}`)
     );
   }
   if (task.completed) {
@@ -211,13 +224,19 @@ export const buildIcalTask = (task: {
   return l.join('\r\n') + '\r\n';
 };
 
-export const modifyIcalTask = (icalData: string, changes: Record<string, string>): string => {
+export const modifyIcalTask = (
+  icalData: string,
+  changes: Record<string, string>
+): string => {
   const lines = unfoldIcal(icalData).split(/\r?\n/);
   const now = toIcalUtc(new Date());
 
   const changeMap = new Map<string, string>();
   for (const [prop, value] of Object.entries(changes)) {
-    changeMap.set(prop.split(/[;:]/)[0], value ? foldIcalLine(`${prop}:${value}`) : '');
+    changeMap.set(
+      prop.split(/[;:]/)[0],
+      value ? foldIcalLine(`${prop}:${value}`) : ''
+    );
   }
 
   const replaced = new Set<string>();
@@ -266,7 +285,9 @@ export const modifyIcalTask = (icalData: string, changes: Record<string, string>
         insert.push(val);
       }
     }
-    const hasSeq = result.slice(0, endIdx).some((l) => l.startsWith('SEQUENCE:'));
+    const hasSeq = result
+      .slice(0, endIdx)
+      .some((l) => l.startsWith('SEQUENCE:'));
     if (!hasSeq) insert.push('SEQUENCE:1');
     result.splice(endIdx, 0, ...insert);
   }
