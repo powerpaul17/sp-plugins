@@ -3,7 +3,11 @@ import type {
   PluginSearchResult
 } from '../../shared/src/plugin-api-types';
 import type { ParsedVtodo } from './ical-utils';
-import { parseIcalDateTime } from './ical-utils';
+import {
+  parseIcalDateTime,
+  splitIcalList,
+  unescapeIcalText
+} from './ical-utils';
 
 export const mapVtodoToSearchResult = (
   vt: ParsedVtodo
@@ -28,9 +32,8 @@ export const mapVtodoToIssue = (vt: ParsedVtodo): PluginIssue => {
       ? parseIcalDateTime(vt.lastModified, '')?.getTime()
       : undefined,
     labels: vt.categories
-      ? vt.categories
-          .split(',')
-          .map((c) => c.trim())
+      ? splitIcalList(vt.categories)
+          .map((c) => unescapeIcalText(c.trim()))
           .filter(Boolean)
       : [],
     priority: vt.priority ? parseInt(vt.priority, 10) : undefined,

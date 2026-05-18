@@ -16,6 +16,8 @@ import {
 } from './caldav-client';
 import {
   escapeIcalText,
+  unescapeIcalText,
+  splitIcalList,
   toIcalUtc,
   toIcalDate,
   parseIcalDateTime,
@@ -246,6 +248,26 @@ PluginAPI.registerIssueProvider({
         return parseDuration(issueValue as string);
       }
     },
+    {
+      taskField: 'tagIds',
+      issueField: 'categories',
+      defaultDirection: 'both',
+      toIssueValue: (taskValue: unknown): string => {
+        const labels = taskValue as string[];
+        return labels?.length
+          ? labels.map((l) => escapeIcalText(l)).join(',')
+          : '';
+      },
+      toTaskValue: (issueValue: unknown): string[] => {
+        if (typeof issueValue === 'string') {
+          return splitIcalList(issueValue)
+            .map((l) => unescapeIcalText(l.trim()))
+            .filter(Boolean);
+        }
+        if (Array.isArray(issueValue)) return issueValue as string[];
+        return [];
+      }
+    }
   ] satisfies PluginFieldMapping[],
 
   // ── Push Changes to CalDAV ────────────────────────────────────────────────
@@ -299,6 +321,9 @@ PluginAPI.registerIssueProvider({
         icalChanges['DUE;VALUE=DATE'] = changes['due_dateonly'] as string;
       } else if ('due_timed' in changes || 'due_dateonly' in changes) {
         icalChanges['DUE'] = '';
+      }
+      if ('categories' in changes) {
+        icalChanges['CATEGORIES'] = changes['categories'] as string;
       }
 
       const modified = modifyIcalTask(vt.rawIcal, icalChanges);
@@ -389,6 +414,7 @@ PluginAPI.registerIssueProvider({
       summary: issue.title,
       description: issue.body,
       status: issue.state,
+      categories: issue.labels?.length ? issue.labels : []
     };
   }
 });

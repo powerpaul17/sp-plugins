@@ -20,6 +20,27 @@ export const unescapeIcalText = (text: string): string =>
     .replace(/\\;/g, ';')
     .replace(/\\\\/g, '\\');
 
+export const splitIcalList = (value: string): string[] => {
+  const parts: string[] = [];
+  let current = '';
+  let i = 0;
+  while (i < value.length) {
+    if (value[i] === '\\' && i + 1 < value.length) {
+      current += value[i] + value[i + 1];
+      i += 2;
+    } else if (value[i] === ',') {
+      parts.push(current);
+      current = '';
+      i++;
+    } else {
+      current += value[i];
+      i++;
+    }
+  }
+  parts.push(current);
+  return parts;
+};
+
 export const foldIcalLine = (line: string): string => {
   const bytes = _encoder.encode(line);
   if (bytes.length <= 75) return line;
@@ -172,7 +193,7 @@ export const buildIcalTask = (task: {
   completed?: string;
   status?: string;
   priority?: string;
-  categories?: string;
+  categories?: string[];
   location?: string;
 }): string => {
   const now = toIcalUtc(new Date());
@@ -212,8 +233,9 @@ export const buildIcalTask = (task: {
   if (task.priority) {
     l.push(`PRIORITY:${task.priority}`);
   }
-  if (task.categories) {
-    l.push(foldIcalLine(`CATEGORIES:${task.categories}`));
+  if (task.categories?.length) {
+    const escaped = task.categories.map((c) => escapeIcalText(c)).join(',');
+    l.push(foldIcalLine(`CATEGORIES:${escaped}`));
   }
   if (task.location) {
     l.push(foldIcalLine(`LOCATION:${escapeIcalText(task.location)}`));
